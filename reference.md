@@ -10,7 +10,7 @@ ORCHESTRATOR (Cursor Agent)
   1. Fetch all tickets (parallel)
   2. Triage: impact + conflict detection + two-layer questions
   3. Human checkpoint (one interaction)
-  4. Setup: worktrees + Docker image + copy local config + containers
+  4. Setup: worktrees + (Docker image + containers, or local app servers)
   5. Dispatch: Task subagents (up to 3 parallel)
   6. Post-process: Jira + PRs + cleanup
        │             │
@@ -84,10 +84,18 @@ If your app is Python 2 or has no encoding declaration, avoid non-ASCII in code/
 ### 12. Jira comment updates
 `upload-jira-screenshots.sh` edits an existing "Browser Test Results" comment in-place when present (Jira doesn't allow delete). If edit fails, it posts a new comment.
 
-## Docker Strategy
+## Docker Strategy (when JIRA_USE_DOCKER=true)
 
 - **Image:** Set `JIRA_WORKER_IMAGE` (default `multi-jira-worker:latest`). Use `JIRA_BASE_IMAGE_CANDIDATES` to tag an existing image, or `JIRA_DOCKERFILE` to build.
 - **Ports:** 8101, 8102, 8103, ... (one per ticket). Your main dev server is unaffected.
+- **App command:** Set `JIRA_APP_RUN_CMD` for the container start command (e.g. Django `python manage.py runserver 0.0.0.0:8000`, Flask `flask run --host=0.0.0.0 --port 8000`, FastAPI `uvicorn myapp:app --host 0.0.0.0 --port 8000`).
+
+## Without-Docker mode (when JIRA_USE_DOCKER=false)
+
+- **When to use:** Projects that run the app natively (e.g. `python manage.py runserver`, `flask run`, `uvicorn`). No Docker or docker-compose required.
+- **Config:** Set `JIRA_LOCAL_RUN_CMD` with `{{PORT}}` where the port goes (e.g. `python manage.py runserver 0.0.0.0:{{PORT}}`, `flask run --host=0.0.0.0 --port {{PORT}}`). The workflow writes a list file (`.jira-swarms-local-servers.list`: one line per worktree and port), runs `scripts/start-local-servers.sh` to start each app in the background, and records PIDs in `.jira-swarms-pids`.
+- **Shared DB:** Worktrees typically share the same DB/Redis (e.g. localhost). Ensure your run command or env uses the correct config; the skill does not isolate DB per worktree.
+- **Cleanup:** `cleanup.sh` runs `scripts/stop-local-servers.sh` (kills processes by PID file), then removes worktrees and generated files. No Docker steps are run.
 
 ## Browser Testing
 
@@ -102,13 +110,17 @@ Tickets that touch overlapping files must run in different waves. No overlap →
 ## Troubleshooting
 
 ```bash
-# Full cleanup (worktrees + containers + generated files)
+# Full cleanup (worktrees + containers or local servers + generated files)
+# Uses JIRA_USE_DOCKER to decide whether to stop containers or local processes
 bash "${MULTI_JIRA_SKILL_DIR}/scripts/cleanup.sh" --force
 
-# Container logs
+# Docker mode: container logs
 docker logs worker-<key> 2>&1 | tail -20
 
-# Force rebuild image
+# Docker mode: force rebuild image
 docker rmi multi-jira-worker:latest
 bash "${MULTI_JIRA_SKILL_DIR}/scripts/build-image.sh"
+
+# Without-Docker: stop local servers only (if cleanup didn't run)
+JIRA_GIT_REPO_DIR=/path/to/your/repo bash "${MULTI_JIRA_SKILL_DIR}/scripts/stop-local-servers.sh"
 ```

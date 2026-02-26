@@ -1,11 +1,11 @@
 ---
 name: jira-swarms
-description: Parallel development workflow for multiple Jira tickets. Fetches tickets, batch triage with codebase-aware clarifying questions (Product + Technical), conflict detection, isolated git worktrees, Docker containers per ticket, parallel implementation via Task subagents, headless browser testing, Jira screenshot uploads, Bitbucket/GitHub PRs, and batch Telegram notification. Use when the user says "run jira-swarms on PROJ-101, PROJ-102" or asks to work on multiple Jira tickets at once.
+description: Parallel development workflow for multiple Jira tickets. Fetches tickets, batch triage with codebase-aware clarifying questions (Product + Technical), conflict detection, isolated git worktrees, optional Docker containers or local servers per ticket, parallel implementation via Task subagents, headless browser testing, Jira screenshot uploads, Bitbucket/GitHub PRs, and batch Telegram notification. Supports Django, Flask, FastAPI; run with Docker or without. Use when the user says "run jira-swarms on PROJ-101, PROJ-102" or asks to work on multiple Jira tickets at once.
 ---
 
 # jira-swarms — Parallel Jira Dev Workflow
 
-Orchestrates parallel development of multiple Jira tickets. Each ticket gets its own **git worktree** and **Docker container** (separate port). All paths and project-specific settings are driven by environment variables so you can use this with any repo.
+Orchestrates parallel development of multiple Jira tickets. Each ticket gets its own **git worktree** and either a **Docker container** or a **local app process** (separate port). All paths and project-specific settings are driven by environment variables so you can use this with any repo. Supports **Django** (default), **Flask**, and **FastAPI**; can run **with Docker** or **without Docker** (native/local).
 
 ## Prerequisites
 
@@ -20,21 +20,23 @@ Orchestrates parallel development of multiple Jira tickets. Each ticket gets its
     - Jira: `JIRA_API_TOKEN`, `JIRA_USER`, `JIRA_BASE_URL`
     - PR provider: `PR_PROVIDER` (`bitbucket` or `github`)
     - Bitbucket: `BB_USER`, `BB_API_TOKEN`, `BB_REPO_SLUG` (e.g. `owner/repo`)
-    - GitHub: `GH_TOKEN` **or** `GITHUB_TOKEN`, and `GH_REPO_SLUG` (e.g. `owner/repo`)
+    - GitHub: `GH_TOKEN` **or** `GITHUB_TOKEN`, `GH_REPO_SLUG` (e.g. `owner/repo`)
     - Worktree paths to copy: `JIRA_WORKTREE_COPY_PATHS` (comma-separated, repo-relative)
+    - **Run mode:** `JIRA_USE_DOCKER` — `true` (Docker containers per ticket) or `false` (local app process per worktree). If unset, the skill asks on first use and saves to config.
+    - **App run command (Docker mode):** `JIRA_APP_RUN_CMD` — command run inside the container (e.g. `python manage.py runserver 0.0.0.0:8000`). Default when `manage.py` exists: Django runserver. For Flask/FastAPI set as needed.
+    - **App run command (without Docker):** `JIRA_LOCAL_RUN_CMD` — template for starting the app in the worktree; use `{{PORT}}` for the assigned port (e.g. `python manage.py runserver 0.0.0.0:{{PORT}}`, `flask run --host=0.0.0.0 --port {{PORT}}`, `uvicorn myapp:app --host 0.0.0.0 --port {{PORT}}`). Required when `JIRA_USE_DOCKER=false`.
+    - Optional: `JIRA_LOCAL_START_SCRIPT` — path to a script that receives `JIRA_WORKTREE_DIR` and `JIRA_PORT` (env) and starts the app; alternative to `JIRA_LOCAL_RUN_CMD`.
     - Optional path overrides: `JIRA_GIT_REPO_DIR`, `JIRA_WORKTREE_BASE`, `MULTI_JIRA_SKILL_DIR`
 - **Env vars (optional overrides, e.g. CI or debugging)**:
   - If set in the shell, `JIRA_API_TOKEN`, `JIRA_USER`, `JIRA_BASE_URL`, `PR_PROVIDER`, `BB_*`, `GH_*`,
-    `JIRA_GIT_REPO_DIR`, `JIRA_WORKTREE_BASE`, `MULTI_JIRA_SKILL_DIR`, and `JIRA_WORKTREE_COPY_PATHS`
+    `JIRA_GIT_REPO_DIR`, `JIRA_WORKTREE_BASE`, `MULTI_JIRA_SKILL_DIR`, `JIRA_WORKTREE_COPY_PATHS`, `JIRA_USE_DOCKER`, `JIRA_LOCAL_RUN_CMD`, `JIRA_APP_RUN_CMD`
     override values loaded from the per-project config.
 - **Browser tests**: `BROWSER_TEST_USER`, `BROWSER_TEST_PASSWORD`.
+- **Docker (only when `JIRA_USE_DOCKER=true`):**
+  - **Docker** and **docker-compose** must be installed. When `JIRA_USE_DOCKER=false`, Docker is not required.
 - **Other tools**:
-  - **Docker** and **docker-compose** installed.
+  - **Git 2.5+** with worktree support.
   - Optional: **Playwright** (for bundled browser-login example), **Telegram** env vars for notifications.
-- **Jira CLI** configured for your Jira server.
-- **Docker** and **docker-compose** installed.
-- **Git 2.5+** with worktree support.
-- Optional: **Playwright** (for bundled browser-login example), **Telegram** env vars for notifications.
 
 ## Workflow Checklist
 
@@ -43,7 +45,7 @@ Orchestrates parallel development of multiple Jira tickets. Each ticket gets its
 - [ ] Step 2: Triage — impact analysis, conflict detection, complexity classification
 - [ ] Step 2d: Clarifying questions (CRITICAL — Product + Technical, two layers per ticket)
 - [ ] Step 3: Human checkpoint (hard gate — ALL questions answered, execution plan confirmed)
-- [ ] Step 4: Infrastructure setup — worktrees, Docker image, containers, Jira transitions
+- [ ] Step 4: Infrastructure setup — worktrees; then Docker image + containers (if JIRA_USE_DOCKER=true) or start local servers (if false); Jira transitions
 - [ ] Step 5: Dispatch workers — parallel implementation via Task subagents
 - [ ] Step 5c-post: Read Release Notes & run DB migrations (BEFORE browser testing)
 - [ ] Step 5d: Browser testing & screenshots (sequential, per SUCCESS ticket)
@@ -76,12 +78,18 @@ Extract from user's message. Accept comma/space/newline separated.
     - Ask for **files to copy into each worktree**:
       - Prompt: “Which local config files should be copied into each worktree (e.g. `.env`, `.env.local`, `local_settings.py`)? Comma-separated, or leave blank for none.”
       - Save answer as `JIRA_WORKTREE_COPY_PATHS` (comma-separated, repo-relative).
+    - **Run mode:** Ask: "Run with Docker (containers per ticket) or without Docker (native/local)? [Docker / Without Docker]". Save as `JIRA_USE_DOCKER=true` or `JIRA_USE_DOCKER=false`.
+    - **App start command:**
+      - If **Docker:** Ask: "What command starts your app inside the container? Use port 8000 (mapped to host)." If repo has `manage.py`, suggest default: `python manage.py runserver 0.0.0.0:8000`. For Flask: `flask run --host=0.0.0.0 --port 8000`. For FastAPI: `uvicorn myapp:app --host 0.0.0.0 --port 8000`. Save as `JIRA_APP_RUN_CMD`.
+      - If **Without Docker:** Ask: "What command starts your app? Use {{PORT}} where the port goes." Suggest: Django `python manage.py runserver 0.0.0.0:{{PORT}}`, Flask `flask run --host=0.0.0.0 --port {{PORT}}`, FastAPI `uvicorn myapp:app --host 0.0.0.0 --port {{PORT}}`. Save as `JIRA_LOCAL_RUN_CMD`.
     - Optionally ask for path overrides: `JIRA_WORKTREE_BASE`, `JIRA_GIT_REPO_DIR` (rare; default is usually fine).
     - Write all collected values into `PROJECT_CONFIG_PATH` (shell-style `KEY=VALUE`), with a comment indicating it was generated for this repo.
+- **Existing config but `JIRA_USE_DOCKER` not set:**
+  - If `PROJECT_CONFIG_PATH` exists but `JIRA_USE_DOCKER` is not set (or empty), ask once: "This project doesn't have a run mode set. Use Docker (containers per ticket) or without Docker (native/local)? [Docker / Without Docker]". Append `JIRA_USE_DOCKER=...` to the config (and if Without Docker, prompt for `JIRA_LOCAL_RUN_CMD` if not set; if Docker, prompt for `JIRA_APP_RUN_CMD` if not set).
 - **Load per-project config and apply overrides:**
   - If `PROJECT_CONFIG_PATH` exists, load it (shell-style `key=value`). Values in this file override the derived defaults.
   - Finally, allow explicit environment variables (`JIRA_GIT_REPO_DIR`, `JIRA_WORKTREE_BASE`, `MULTI_JIRA_SKILL_DIR`,
-    `JIRA_WORKTREE_COPY_PATHS`, Jira and PR vars) to override both defaults and per-project config. This is mainly for CI or advanced users.
+    `JIRA_WORKTREE_COPY_PATHS`, `JIRA_USE_DOCKER`, `JIRA_LOCAL_RUN_CMD`, `JIRA_APP_RUN_CMD`, Jira and PR vars) to override both defaults and per-project config. This is mainly for CI or advanced users.
 
 For diagnostics, print which values are in effect:
 
@@ -92,7 +100,8 @@ for VAR in JIRA_API_TOKEN JIRA_USER JIRA_BASE_URL \
            PR_PROVIDER \
            BROWSER_TEST_USER BROWSER_TEST_PASSWORD \
            JIRA_GIT_REPO_DIR JIRA_WORKTREE_BASE MULTI_JIRA_SKILL_DIR \
-           JIRA_WORKTREE_COPY_PATHS JIRA_LOCAL_CONFIG_PATH; do
+           JIRA_WORKTREE_COPY_PATHS JIRA_LOCAL_CONFIG_PATH \
+           JIRA_USE_DOCKER JIRA_LOCAL_RUN_CMD JIRA_APP_RUN_CMD; do
     echo "$VAR: ${!VAR:+SET}"
 done
 echo "PROJECT_ID: ${PROJECT_ID:-unknown}"
@@ -141,6 +150,8 @@ Present full triage report with two-layer questions per ticket, conflict analysi
 
 ## Step 4: Infrastructure Setup
 
+Branch by `JIRA_USE_DOCKER`: when `true`, use Docker (4b + 4f); when `false`, skip 4b and use 4f-alt (local servers).
+
 ### 4a. Update Main Branch
 **NEVER `git stash`.** Ignore expected local changes (e.g. `settings.py`, `docker-compose.override.yml`).
 
@@ -150,11 +161,13 @@ git checkout master
 git pull --ff-only
 ```
 
-### 4b. Build / Reuse Docker Image
+### 4b. Build / Reuse Docker Image (only when JIRA_USE_DOCKER=true)
+When `JIRA_USE_DOCKER` is not `true`, skip this step.
+
 ```bash
 bash "${MULTI_JIRA_SKILL_DIR}/scripts/build-image.sh"
 ```
-Uses `JIRA_GIT_REPO_DIR`, `JIRA_WORKER_IMAGE`, optional `JIRA_BASE_IMAGE_CANDIDATES` or `JIRA_DOCKERFILE`.
+Uses `JIRA_GIT_REPO_DIR`, `JIRA_WORKER_IMAGE`, optional `JIRA_BASE_IMAGE_CANDIDATES` or `JIRA_DOCKERFILE`. Container command should use `JIRA_APP_RUN_CMD` (Django/Flask/FastAPI examples in Prerequisites).
 
 ### 4c. Create Git Worktrees + Copy Local Config
 ```bash
@@ -211,8 +224,10 @@ Use your Jira transition names if different.
 ### 4e. Assign Ports
 Sequential from **8101**: ticket 1 → 8101, ticket 2 → 8102, etc.
 
-### 4f. Generate & Start Docker Containers
-Use `JIRA_DOCKER_NETWORK` (same network as your main app), `JIRA_WORKER_IMAGE`, `JIRA_COMPOSE_PROJECT` (e.g. `jira-swarms`). Inline environment vars from your main app service into each worker; do not rely on `env_file:` alone. Create any log/cache dirs your app needs in the container `command`. Example template:
+### 4f. Generate & Start Docker Containers (only when JIRA_USE_DOCKER=true)
+When `JIRA_USE_DOCKER` is not `true`, skip this step and use **4f-alt** instead.
+
+Use `JIRA_DOCKER_NETWORK` (same network as your main app), `JIRA_WORKER_IMAGE`, `JIRA_COMPOSE_PROJECT` (e.g. `jira-swarms`). Set container `command` from `JIRA_APP_RUN_CMD` (e.g. Django `python manage.py runserver 0.0.0.0:8000`, Flask `flask run --host=0.0.0.0 --port 8000`, FastAPI `uvicorn myapp:app --host 0.0.0.0 --port 8000`). Inline environment vars from your main app service into each worker; do not rely on `env_file:` alone. Create any log/cache dirs your app needs in the container `command`. Example template:
 
 ```yaml
 # docker-compose.multi-jira.yml (generate per run)
@@ -224,7 +239,7 @@ services:
   worker-<key>:
     image: multi-jira-worker:latest
     container_name: worker-<key>
-    command: <your app start command, e.g. python manage.py runserver 0.0.0.0:8000>
+    command: <from JIRA_APP_RUN_CMD, e.g. python manage.py runserver 0.0.0.0:8000>
     ports:
       - '<PORT>:8000'
     volumes:
@@ -241,6 +256,25 @@ Start:
 docker-compose -p "${MULTI_JIRA_COMPOSE_PROJECT:-jira-swarms}" -f docker-compose.multi-jira.yml up -d
 ```
 Health check after ~90s (app startup may be slow). View logs with the same `-p` and `-f`.
+
+### 4f-alt. Start Local App Servers (only when JIRA_USE_DOCKER=false)
+When `JIRA_USE_DOCKER` is `false`, skip 4b and 4f. After creating worktrees and assigning ports, start the app in each worktree on its assigned port from the **host** (not in a container).
+
+1. Write a **servers list file** (e.g. `$JIRA_GIT_REPO_DIR/.jira-swarms-local-servers.list`) with one line per ticket: `WORKTREE_DIR PORT` (space-separated). Example:
+   ```
+   /path/to/worktrees/wt-PROJ-101 8101
+   /path/to/worktrees/wt-PROJ-102 8102
+   ```
+2. Run the start script:
+   ```bash
+   bash "${MULTI_JIRA_SKILL_DIR}/scripts/start-local-servers.sh"
+   ```
+   The script reads `JIRA_LOCAL_RUN_CMD` (or `JIRA_LOCAL_START_SCRIPT`), substitutes `{{PORT}}` with the assigned port, runs the command from each worktree directory in the background, and writes PIDs to a known file (e.g. `.jira-swarms-pids` in the repo dir) for cleanup.
+3. Wait for servers to listen (e.g. curl or similar on `http://127.0.0.1:<PORT>` with timeout ~60–90s).
+
+Without Docker, worktrees typically share the same DB/Redis (e.g. localhost); ensure your app run command or env uses the correct config.
+
+**Optional — JIRA_LOCAL_START_SCRIPT contract:** If using a custom script instead of `JIRA_LOCAL_RUN_CMD`, the script receives env vars `JIRA_WORKTREE_DIR` and `JIRA_PORT`. It may start the app in foreground (caller will background it and record PID) or in background; exit 0 on success so the orchestrator can retry or report on failure.
 
 ---
 
@@ -317,6 +351,7 @@ jira issue move <KEY> "Code Review Done"
 ```bash
 bash "${MULTI_JIRA_SKILL_DIR}/scripts/cleanup.sh" --force
 ```
+When `JIRA_USE_DOCKER=true`, the script stops Docker containers and removes worktrees. When `JIRA_USE_DOCKER=false`, it runs `scripts/stop-local-servers.sh` (kills processes by PID file), then removes worktrees and generated files.
 
 ### 6e. Report to User
 Summary per ticket (SUCCESS/PARTIAL/FAILED), PR links, browser test results, screenshot counts, any manual steps. Optional: `batch-notify-telegram.sh` with results JSON.
@@ -331,7 +366,7 @@ When the batch is one epic — one branch, multiple sub-tasks — commit one tas
 
 ## Error Handling & Circuit Breakers
 
-- **Orchestrator:** Stop and ask user on git dirty main, Docker build fail, missing env vars, or all tickets failed. Retry up to 3 then skip: container fail, worktree creation fail; ask user on git push fail.
+- **Orchestrator:** Stop and ask user on git dirty main, Docker build fail (when `JIRA_USE_DOCKER=true`), missing env vars, or all tickets failed. Retry up to 3 then skip: container fail (Docker mode), worktree creation fail, **local server start fail** (when `JIRA_USE_DOCKER=false`, e.g. port in use, command not found); ask user on git push fail.
 - **Worker:** Lint loop → suppress after 3; test failures → partial after 3; server crash → skip testing after 3; stuck → failed after 3.
 - **Browser:** Max 2 login attempts per port; max 3 consecutive screenshot failures across tickets then stop browser testing; per-URL timeout 30s. Browser failures do not downgrade SUCCESS to FAILED.
 
