@@ -63,7 +63,7 @@ Extract from user's message. Accept comma/space/newline separated.
 - Derive defaults:
   - `MULTI_JIRA_SKILL_DIR` — directory containing this `SKILL.md` (typically `~/.cursor/skills/jira-swarms` when installed via `install.sh`).
   - `JIRA_GIT_REPO_DIR` — git root of the current workspace (`git rev-parse --show-toplevel`).
-  - `PROJECT_ID` — a stable, filesystem-safe identifier derived from `JIRA_GIT_REPO_DIR` (e.g. hash or sanitized path).
+  - `PROJECT_ID` — a stable, filesystem-safe identifier for this repo. **Default convention:** use the **repo folder name** (i.e. `basename(JIRA_GIT_REPO_DIR)`, e.g. `backend`, `frontend`). Allow an explicit `PROJECT_ID` env var to override when the user prefers a custom slug.
   - `PROJECT_CONFIG_PATH` — `~/.jira-swarms/config/${PROJECT_ID}.env`.
   - `JIRA_WORKTREE_BASE` — default to `~/.jira-swarms/worktrees/${PROJECT_ID}` **unless** overridden by env.
 - **First run for this repo (no config yet):**

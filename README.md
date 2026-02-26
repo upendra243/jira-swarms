@@ -2,6 +2,16 @@
 
 Run multiple Jira tickets in parallel from [Cursor](https://cursor.com): fetch, triage, worktrees, Docker workers, implementation, optional browser tests and PRs.
 
+## Prerequisites
+
+- **Git**: a working Git CLI (`git` 2.5+ with worktree support) installed and available on your `PATH`.
+- **Jira CLI**: a `jira` command configured for your Jira server (for example, [`go-jira`](https://github.com/go-jira/jira)).
+  - You can verify it is working with a known ticket key:
+    ```bash
+    jira issue view <TASK-ID>
+    ```
+    This should print the issue JSON or a formatted view without errors.
+
 ## Install
 
 **One-click** (default code location: `~/.cursor/skills/jira-swarms`; prompts only if the directory exists or when run interactively):
@@ -53,8 +63,8 @@ ORCHESTRATOR (Cursor Agent)
 
 - **Skill code location (default):** `~/.cursor/skills/jira-swarms` (where `install.sh` installs).
 - **Per-project config + worktrees:** `~/.jira-swarms/`
-  - `~/.jira-swarms/config/<project-id>.env` — overrides for one app repo (Jira URL/user/token, `JIRA_GIT_REPO_DIR`, `JIRA_WORKTREE_BASE`, etc.).
-  - `~/.jira-swarms/worktrees/<project-id>/...` — default parent for git worktrees for that project.
+  - `~/.jira-swarms/config/<project-id>.env` — overrides for one app repo (Jira URL/user/token, `JIRA_GIT_REPO_DIR`, `JIRA_WORKTREE_BASE`, etc.). **Recommended convention:** use the **repo folder name** as `<project-id>` (e.g. `backend`, `frontend`).
+  - `~/.jira-swarms/worktrees/<project-id>/...` — default parent for git worktrees for that project (same `<project-id>` as above).
 - **Repo detection:** when run inside Cursor, the skill treats the **current workspace git root** as the default `JIRA_GIT_REPO_DIR`. You only need to override it if you deliberately want a different repo.
 
 ## Optional (only when you use that part)
