@@ -99,7 +99,33 @@ If you already have this file on another machine, you can copy `~/.jira-swarms/c
   - **GitHub**: set `GH_TOKEN` **or** `GITHUB_TOKEN` and `GH_REPO_SLUG` so the workflow can create GitHub PRs.
   - Optional: set `PR_PROVIDER` to `bitbucket` or `github` to override auto-detection (from env vars or git remote).
 - **Browser tests + Jira screenshots** — set `BROWSER_TEST_USER`, `BROWSER_TEST_PASSWORD`, and `JIRA_API_TOKEN` + `JIRA_USER` + `JIRA_BASE_URL`. The bundled login script is an **example** for one app’s flow; for your app, follow the guided process in [docs/custom-login-flow.md](docs/custom-login-flow.md) to implement your own script (or use the template and set `JIRA_BROWSER_LOGIN_SCRIPT`).
-- **Telegram** — set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` for a batch summary.
+- **Telegram** — for batch-complete notifications. See [Telegram setup](#telegram-setup) below.
+
+### Telegram setup
+
+1. **Create a bot and get the token**
+   - In Telegram, open [@BotFather](https://t.me/BotFather), send `/newbot`, follow the prompts, and copy the token (e.g. `8406255847:AAEfBl-...`).
+
+2. **Get your chat ID** (numeric; the bot username is not valid).
+   - Send a message to your bot (e.g. `/start` or any text), then run:
+     ```bash
+     curl -s "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getUpdates"
+     ```
+     In the JSON, find `"chat":{"id":5613219694,...}` — the `id` value (e.g. `5613219694`) is your chat ID. For groups, `id` is often negative.
+
+3. **Set the env vars**
+   - One-off in the current shell:
+     ```bash
+     export TELEGRAM_BOT_TOKEN="your-bot-token"
+     export TELEGRAM_CHAT_ID="5613219694"
+     ```
+   - Or add the same two lines to `~/.jira-swarms/config/<project-id>.env` so the workflow can send notifications after each batch run.
+
+4. **Test**
+   ```bash
+   ./scripts/batch-notify-telegram.sh "Hello from jira-swarms — Telegram test OK"
+   ```
+   You should see `Sent.` and receive the message in Telegram. See [docs/telegram-testing.md](docs/telegram-testing.md) for more options and troubleshooting.
 
 Env vars are documented in `SKILL.md` and in the comments in your per-project config files under `~/.jira-swarms/config/`. You only need to set the ones you actually use.
 

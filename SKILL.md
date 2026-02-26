@@ -319,7 +319,15 @@ bash "${MULTI_JIRA_SKILL_DIR}/scripts/cleanup.sh" --force
 ```
 
 ### 6e. Report to User
-Summary per ticket (SUCCESS/PARTIAL/FAILED), PR links, browser test results, screenshot counts, any manual steps. Optional: `batch-notify-telegram.sh` with results JSON.
+Summary per ticket (SUCCESS/PARTIAL/FAILED), PR links, browser test results, screenshot counts, any manual steps.
+
+**Telegram (optional, once per batch):** After building the summary, if the user has Telegram configured (`TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in project config or env), send a batch notification. Write a results JSON file (see `scripts/sample-results.json` for format: `{"tickets":[{"key","summary","status","pr_url"?, "error"?, "reason"?}]}`), then run:
+```bash
+# Source project config so TELEGRAM_* are set if configured
+set -a; [ -f "${PROJECT_CONFIG_PATH}" ] && . "${PROJECT_CONFIG_PATH}"; set +a
+bash "${MULTI_JIRA_SKILL_DIR}/scripts/batch-notify-telegram.sh" /path/to/results.json
+```
+The script exits 0 if Telegram is not configured (no-op); otherwise it sends one message with the batch summary.
 
 ---
 

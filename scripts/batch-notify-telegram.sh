@@ -3,12 +3,22 @@ set -euo pipefail
 if [[ -z "${TELEGRAM_BOT_TOKEN:-}" || -z "${TELEGRAM_CHAT_ID:-}" ]]; then
     echo "SKIP: Telegram not configured."; exit 0
 fi
+# chat_id must be numeric (user: positive, group: often negative). Usernames like @bot are not valid.
+if [[ ! "${TELEGRAM_CHAT_ID}" =~ ^-?[0-9]+$ ]]; then
+    echo "ERROR: TELEGRAM_CHAT_ID must be a numeric chat ID (e.g. from @userinfobot or getUpdates), not a username. Got: ${TELEGRAM_CHAT_ID}"
+    exit 1
+fi
 
 if [ $# -eq 1 ] && [ ! -f "$1" ]; then
-    curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+    RESP=$(curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
         -d "chat_id=${TELEGRAM_CHAT_ID}" -d "parse_mode=Markdown" \
-        --data-urlencode "text=$1" | tail -1 | grep -q "200" \
-        && echo "Sent." || echo "Failed."
+        --data-urlencode "text=$1")
+    if echo "$RESP" | grep -q '"ok":true'; then
+        echo "Sent."
+    else
+        echo "Failed."
+        echo "Telegram API response: $RESP"
+    fi
     exit 0
 fi
 
@@ -27,7 +37,12 @@ MESSAGE="jira-swarms complete: ${SUCCESS}/${TOTAL} succeeded
 
 ${TICKET_LINES}"
 
-curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+RESP=$(curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
     -d "chat_id=${TELEGRAM_CHAT_ID}" -d "parse_mode=Markdown" \
-    --data-urlencode "text=${MESSAGE}" | grep -q '"ok":true' \
-    && echo "Batch notification sent." || echo "WARNING: Notification failed."
+    --data-urlencode "text=${MESSAGE}")
+if echo "$RESP" | grep -q '"ok":true'; then
+    echo "Batch notification sent."
+else
+    echo "WARNING: Notification failed."
+    echo "Telegram API response: $RESP"
+fi

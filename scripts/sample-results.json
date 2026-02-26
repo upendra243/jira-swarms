@@ -1,0 +1,22 @@
+{
+  "tickets": [
+    {
+      "key": "PROJ-101",
+      "summary": "Add login validation",
+      "status": "success",
+      "pr_url": "https://bitbucket.org/example/repo/pull-requests/1"
+    },
+    {
+      "key": "PROJ-102",
+      "summary": "Fix footer layout",
+      "status": "failed",
+      "error": "Tests timed out"
+    },
+    {
+      "key": "PROJ-103",
+      "summary": "Update API docs",
+      "status": "partial",
+      "reason": "PR created, browser test skipped"
+    }
+  ]
+}
