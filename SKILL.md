@@ -15,8 +15,8 @@ Orchestrates parallel development of multiple Jira tickets. Each ticket gets its
   - A `jira` CLI must be available and configured for your Jira server (e.g. the open-source [`go-jira` CLI](https://github.com/go-jira/jira)).
   - The `install.sh` script will detect the absence of a `jira` CLI and, on macOS with Homebrew, can optionally install `go-jira` for you; on other platforms it prints installation instructions.
 - **Per-project config (recommended for freelancers / multiple clients)**:
-  - For each app repo, jira-swarms uses a per-project config file: `~/.jira-swarms/config/<project-id>.env`.
-  - This file is the **primary source of truth** for:
+  - Config lives under `~/.jira-swarms/config/`. You can have multiple `*.env` files there (e.g. `frontend.env`, `backend.env`). The workflow **chooses the one for this project**: `~/.jira-swarms/config/<PROJECT_ID>.env` (e.g. `frontend.env` for a frontend repo, `backend.env` for a backend repo).
+  - That file is the **primary source of truth** for:
     - Jira: `JIRA_API_TOKEN`, `JIRA_USER`, `JIRA_BASE_URL`
     - PR provider: `PR_PROVIDER` (`bitbucket` or `github`)
     - Bitbucket: `BB_USER`, `BB_API_TOKEN`, `BB_REPO_SLUG` (e.g. `owner/repo`)
@@ -64,7 +64,7 @@ Extract from user's message. Accept comma/space/newline separated.
   - `MULTI_JIRA_SKILL_DIR` — directory containing this `SKILL.md` (typically `~/.cursor/skills/jira-swarms` when installed via `install.sh`).
   - `JIRA_GIT_REPO_DIR` — git root of the current workspace (`git rev-parse --show-toplevel`).
   - `PROJECT_ID` — a stable, filesystem-safe identifier for this repo. **Default convention:** use the **repo folder name** (i.e. `basename(JIRA_GIT_REPO_DIR)`, e.g. `backend`, `frontend`). Allow an explicit `PROJECT_ID` env var to override when the user prefers a custom slug.
-  - `PROJECT_CONFIG_PATH` — `~/.jira-swarms/config/${PROJECT_ID}.env`.
+  - `PROJECT_CONFIG_PATH` — `~/.jira-swarms/config/${PROJECT_ID}.env`. The workflow checks for this file; you can have other `*.env` files in `~/.jira-swarms/config/` (e.g. `frontend.env`, `backend.env`) and the one used is the one matching this project.
   - `JIRA_WORKTREE_BASE` — default to `~/.jira-swarms/worktrees/${PROJECT_ID}` **unless** overridden by env.
 - **First run for this repo (no config yet):**
   - If `PROJECT_CONFIG_PATH` does not exist, run a **one-time, per-project setup wizard**:
@@ -165,7 +165,7 @@ Worktrees are created under `$JIRA_WORKTREE_BASE/$MULTI_JIRA_WORKTREE_PREFIX<KEY
 
 **CRITICAL: Copy your project local config files into each worktree.** They are usually gitignored, so worktrees won't have them by default.
 
-- Use `JIRA_WORKTREE_COPY_PATHS` (comma-separated, paths relative to repo root) to declare which files should be copied.
+- `JIRA_WORKTREE_COPY_PATHS` is read from the project config (`PROJECT_CONFIG_PATH`) or from the environment. Use it (comma-separated, paths relative to repo root) to declare which files should be copied.
 - For backwards compatibility, if `JIRA_WORKTREE_COPY_PATHS` is empty but legacy `JIRA_LOCAL_CONFIG_PATH` is set, treat it as a single entry.
 
 Example shell logic:

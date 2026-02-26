@@ -63,9 +63,34 @@ ORCHESTRATOR (Cursor Agent)
 
 - **Skill code location (default):** `~/.cursor/skills/jira-swarms` (where `install.sh` installs).
 - **Per-project config + worktrees:** `~/.jira-swarms/`
-  - `~/.jira-swarms/config/<project-id>.env` — overrides for one app repo (Jira URL/user/token, `JIRA_GIT_REPO_DIR`, `JIRA_WORKTREE_BASE`, etc.). **Recommended convention:** use the **repo folder name** as `<project-id>` (e.g. `backend`, `frontend`).
+  - `~/.jira-swarms/config/` can hold multiple `*.env` files (e.g. `frontend.env`, `backend.env`). The workflow **uses the one for this project**: `~/.jira-swarms/config/<project-id>.env` — e.g. `frontend.env` for a frontend repo, `backend.env` for a backend repo. Use the **repo folder name** as `<project-id>`.
   - `~/.jira-swarms/worktrees/<project-id>/...` — default parent for git worktrees for that project (same `<project-id>` as above).
 - **Repo detection:** when run inside Cursor, the skill treats the **current workspace git root** as the default `JIRA_GIT_REPO_DIR`. You only need to override it if you deliberately want a different repo.
+
+### Configuring per-project
+
+On a **new machine** (or when you want to set things up without the first-run wizard), create the per-project config file and set `JIRA_WORKTREE_COPY_PATHS` there. You can have multiple `*.env` files in `~/.jira-swarms/config/` (e.g. `frontend.env`, `backend.env`); the workflow uses the one that matches this project (`<project-id>.env`).
+
+1. **Choose your project id** — use the repo folder name (e.g. `backend`, `frontend`).
+2. **Create the config file** for this project:
+   ```bash
+   mkdir -p ~/.jira-swarms/config
+   touch ~/.jira-swarms/config/<project-id>.env
+   ```
+   Examples: `~/.jira-swarms/config/frontend.env` for a frontend repo, `~/.jira-swarms/config/backend.env` for a backend repo.
+3. **Edit the file** and set at least Jira credentials and **files to copy into each worktree**:
+   - **`JIRA_WORKTREE_COPY_PATHS`** — comma-separated paths **relative to the repo root** of the files to copy from your main clone into each worktree (e.g. gitignored `.env`, `.env.local`, `local_settings.py`). These are copied after creation so the worktree can run.
+   - Example:
+     ```bash
+     # ~/.jira-swarms/config/backend.env
+     JIRA_BASE_URL=https://your-domain.atlassian.net
+     JIRA_USER=you@example.com
+     JIRA_API_TOKEN=your-token
+     JIRA_WORKTREE_COPY_PATHS=.env,.env.local
+     ```
+   Add `PR_PROVIDER`, `BB_*` or `GH_*` etc. if you use PRs (see SKILL.md).
+
+If you already have this file on another machine, you can copy `~/.jira-swarms/config/<project-id>.env` to the new machine (same path) and adjust paths if needed; `JIRA_WORKTREE_COPY_PATHS` is the same list of repo-relative paths.
 
 ## Optional (only when you use that part)
 
