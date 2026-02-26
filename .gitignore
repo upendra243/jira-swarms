@@ -1,0 +1,46 @@
+# Env and secrets (local .env files live outside this repo, e.g. under ~/.jira-swarms/)
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Playwright / browser
+playwright-report/
+test-results/
+.blob/
+.playwright/
+
+# Artifacts from browser login script (screenshots)
+artifacts/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Cursor
+.cursor/
+
+# IDE / editor
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs and temp
+*.log
+tmp/
+temp/
+.cache/
