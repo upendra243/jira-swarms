@@ -37,27 +37,38 @@ That’s enough for fetch, triage, questions, worktrees, and Docker. The rest is
 
 ## Architecture
 
+Each ticket gets its own **git worktree** and **Docker container** (separate port). Workers share your main app's external services (DB, Redis, etc.).
+
 ```text
 User: "run jira-swarms on PROJ-101, PROJ-102"
   │
   ▼
 ORCHESTRATOR (Cursor Agent)
-  1. Fetch all tickets (parallel)
-  2. Triage: impact + conflict detection + two-layer questions
-  3. Human checkpoint (one interaction)
-  4. Setup: worktrees + Docker image + copy local config + containers
-  5. Dispatch: Task subagents (up to 3 parallel)
-  6. Post-process: Jira + PRs + cleanup
-       │             │
-       ▼             ▼
-  Subagent 1    Subagent 2
-  worktree-101  worktree-102
-  port 8101     port 8102
-       │             │
-       └─────┬───────┘
-             ▼
+  │
+  ├─ 1. Fetch tickets (parallel)
+  ├─ 2. Triage: impact analysis, conflict detection → waves, Product + Technical questions
+  ├─ 3. Human checkpoint (hard gate — all questions answered)
+  ├─ 4. Setup: worktrees + Docker image + copy JIRA_WORKTREE_COPY_PATHS + containers
+  ├─ 5. Dispatch: Task subagents (up to 3 parallel) → commit, PR, test_urls
+  ├─ 5c. Release Notes & migrations (ADD-only, mandatory Jira comments)
+  ├─ 5d. Browser testing (sequential): validate URLs, run login script, screenshots
+  └─ 6. Post-process: Jira updates, screenshot uploads, transitions, cleanup, Telegram
+       │
+       ▼
+  ┌─────────────────────────────────────────┐
+  │  Subagent 1      Subagent 2             │
+  │  worktree-101    worktree-102           │
+  │  port 8101       port 8102              │
+  └────────────┬────────────────────────────┘
+               ▼
      Shared services (DB, Redis, etc.)
 ```
+
+**Conflict detection:** Tickets that touch overlapping files run in different waves (Wave 1 = no overlap, parallel; Wave 2+ = sequential). Max 3 tickets per wave.
+
+[![Complete workflow diagram](jira-swarms-workflow.png)](WORKFLOW_DIAGRAM.md)
+
+*See the complete workflow above (exported from [WORKFLOW_DIAGRAM.md](WORKFLOW_DIAGRAM.md) Mermaid diagram).*
 
 ### Defaults and per-project config
 
