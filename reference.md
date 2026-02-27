@@ -61,6 +61,9 @@ Wait at least 60–90s before health-checking. First HTTP request may be slow (c
 ### 7. Jira transition names
 Use your project's transition names (e.g. "Dev Started", "Code Review Done"). List them with `jira issue view <KEY> --raw | jq -r '.transitions[].name'`.
 
+### 7b. Main branch name
+Set `JIRA_MAIN_BRANCH` (default `master`) in project config for repos using `main`.
+
 ### 8. Jira Screenshot & Comment Rules
 **Only feature confirmation screenshots** belong in Jira — they prove the ticket scope.
 

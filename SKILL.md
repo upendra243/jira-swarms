@@ -23,9 +23,10 @@ Orchestrates parallel development of multiple Jira tickets. Each ticket gets its
     - GitHub: `GH_TOKEN` **or** `GITHUB_TOKEN`, and `GH_REPO_SLUG` (e.g. `owner/repo`)
     - Worktree paths to copy: `JIRA_WORKTREE_COPY_PATHS` (comma-separated, repo-relative)
     - Optional path overrides: `JIRA_GIT_REPO_DIR`, `JIRA_WORKTREE_BASE`, `MULTI_JIRA_SKILL_DIR`
+    - Main branch name: `JIRA_MAIN_BRANCH` (default `master`; use `main` for newer repos)
 - **Env vars (optional overrides, e.g. CI or debugging)**:
   - If set in the shell, `JIRA_API_TOKEN`, `JIRA_USER`, `JIRA_BASE_URL`, `PR_PROVIDER`, `BB_*`, `GH_*`,
-    `JIRA_GIT_REPO_DIR`, `JIRA_WORKTREE_BASE`, `MULTI_JIRA_SKILL_DIR`, and `JIRA_WORKTREE_COPY_PATHS`
+    `JIRA_GIT_REPO_DIR`, `JIRA_WORKTREE_BASE`, `MULTI_JIRA_SKILL_DIR`, `JIRA_WORKTREE_COPY_PATHS`, and `JIRA_MAIN_BRANCH`
     override values loaded from the per-project config.
 - **Browser tests**: `BROWSER_TEST_USER`, `BROWSER_TEST_PASSWORD`.
 - **Other tools**:
@@ -92,7 +93,7 @@ for VAR in JIRA_API_TOKEN JIRA_USER JIRA_BASE_URL \
            PR_PROVIDER \
            BROWSER_TEST_USER BROWSER_TEST_PASSWORD \
            JIRA_GIT_REPO_DIR JIRA_WORKTREE_BASE MULTI_JIRA_SKILL_DIR \
-           JIRA_WORKTREE_COPY_PATHS JIRA_LOCAL_CONFIG_PATH; do
+           JIRA_WORKTREE_COPY_PATHS JIRA_LOCAL_CONFIG_PATH JIRA_MAIN_BRANCH; do
     echo "$VAR: ${!VAR:+SET}"
 done
 echo "PROJECT_ID: ${PROJECT_ID:-unknown}"
@@ -125,11 +126,23 @@ Build file overlap matrix. Group into execution waves:
 | Complexity | Criteria | Confidence |
 |-----------|----------|-----------|
 | Trivial | 1-2 files, simple fix | 90-95% |
-| Standard | 3-5 files, model+admin+template | 75-85% |
+| Standard | 3-5 files, typical CRUD or feature scope | 75-85% |
 | Complex | 6+ files, payment/checkout, new integrations | 40-60% |
 
-### 2d. Clarifying Questions (CRITICAL)
-For each ticket, generate **TWO separate layers**: **Product Questions** (build the right thing) and **Technical Questions** (build the right way). At least 1 per layer per ticket or explicit "N/A" with reasoning. Questions MUST be codebase-informed; look for cross-ticket dependencies; NEVER assume.
+### 2d. Clarifying Questions (CRITICAL — MOST IMPORTANT STEP)
+
+For each ticket, generate **TWO separate layers** of questions:
+
+**Layer 1: Product Questions** — ensure building the right thing  
+**Layer 2: Technical Questions** — ensure building the right way
+
+Rules:
+1. At least 1 question per layer per ticket, OR explicit "N/A" with reasoning
+2. Questions MUST be codebase-informed (cite files, line numbers)
+3. Look for **cross-ticket dependencies**
+4. NEVER assume
+5. **ALWAYS include a browser-testing applicability question in the Technical layer.** Default is **YES (browser testing required)** unless the user explicitly answers that browser testing is not needed. Example technical question per ticket:
+   - `Browser Testing: Should we run browser/Playwright tests for this ticket? (default YES). If NO, please confirm: "Browser Testing: Not needed because <reason>".`
 
 ---
 
@@ -146,7 +159,7 @@ Present full triage report with two-layer questions per ticket, conflict analysi
 
 ```bash
 cd "$JIRA_GIT_REPO_DIR"
-git checkout master
+git checkout "${JIRA_MAIN_BRANCH:-master}"
 git pull --ff-only
 ```
 
@@ -159,7 +172,7 @@ Uses `JIRA_GIT_REPO_DIR`, `JIRA_WORKER_IMAGE`, optional `JIRA_BASE_IMAGE_CANDIDA
 ### 4c. Create Git Worktrees + Copy Local Config
 ```bash
 bash "${MULTI_JIRA_SKILL_DIR}/scripts/create-worktree.sh" \
-    "<KEY>" "<KEY>-<short-description>" "master"
+    "<KEY>" "<KEY>-<short-description>" "${JIRA_MAIN_BRANCH:-master}"
 ```
 Worktrees are created under `$JIRA_WORKTREE_BASE/$MULTI_JIRA_WORKTREE_PREFIX<KEY>` (e.g. `wt-PROJ-101`).
 
@@ -242,12 +255,20 @@ docker-compose -p "${MULTI_JIRA_COMPOSE_PROJECT:-jira-swarms}" -f docker-compose
 ```
 Health check after ~90s (app startup may be slow). View logs with the same `-p` and `-f`.
 
+**Troubleshooting (common examples; adapt for your stack):**
+- `AttributeError: 'module' has no attribute 'X'` (Python) → Re-copy local config from main repo into worktree
+- `OperationalError: Can't connect to MySQL` / `connection refused` (DB) → Check env vars match main app service
+- `No such file or directory: '/path/to/log/...'` → Add `mkdir -p` for those paths in container `command`
+- `ConnectionError: X:6379` (Redis) / similar for other services → Verify host/port in compose matches main app network
+
 ---
 
 ## Step 5: Dispatch Workers (Parallel Implementation)
 
 ### 5a. Launch Task Subagents
 For each ticket, launch a Task subagent with `subagent_type: "generalPurpose"`. Provide ticket details, worktree path, port, affected files, implementation and circuit-breaker rules, and commit/push/PR instructions. Workers create PRs using the generic script (e.g. `"${MULTI_JIRA_SKILL_DIR}/scripts/create-pr.sh"`), which dispatches to Bitbucket or GitHub based on `PR_PROVIDER`, env vars, or the git remote.
+
+**Legacy codebases (Python 2, no encoding declaration):** NEVER use non-ASCII characters (em dash, smart quotes, Unicode) in code or comments — causes `SyntaxError: Non-ASCII character`. Use only plain ASCII.
 
 **Worker return JSON MUST include `test_urls`** — list of 1–3 key URLs to validate. Example:
 ```json
@@ -274,23 +295,124 @@ Each ticket ends as SUCCESS, PARTIAL, or FAILED. Never abort the batch.
 
 ## Step 5c-post: Read Release Notes & Run Migrations (BEFORE browser testing)
 
-**NEVER run DROP migrations** (DROP COLUMN, DROP TABLE) in a shared dev DB — document them for manual execution. **ADD migrations** (new columns, new tables) are fine. Before browser tests, run any ADD migrations from Jira Release Notes comments (e.g. via Python/ORM or SQL inside the app container). Without this, admin or app pages may crash with missing column errors.
+**NEVER run DROP migrations** (DROP COLUMN, DROP TABLE) in a shared dev DB — document them for manual execution. **ADD migrations** (new columns, new tables) are fine.
+
+**CRITICAL (MANDATORY STEP)**: Before running browser tests, you MUST:
+
+1. **Check Jira comments** for any Release Notes containing migration SQL (e.g. `ALTER TABLE`, `CREATE TABLE`).
+2. Either:
+   - Run **only ADD migrations** (ALTER TABLE ADD COLUMN, CREATE TABLE) inside the app container, then add a Jira comment: `Release Notes: Applied ADD-only SQL in dev as per ticket notes.`
+   - Or, if there are **no Release Notes / no schema changes in code**, still add both Jira comments:
+     - `Release Notes: No specific Release Instruction.`
+     - `Migration: No migration needed (no schema changes in code for this ticket).`
+
+Do NOT run any DROP statements from Release Notes in shared dev DB — document them for manual execution only.
+
+### 1. Read existing Jira Release Notes comments
+
+For each SUCCESS ticket:
+```bash
+jira issue view <KEY> --comments 2>&1
+```
+Look for comments containing "Release Notes" with SQL statements.
+
+### 2. Run migrations inside the app container
+
+Use your app's migration tool (ORM, SQL, etc.) inside the app container — avoid raw DB CLI if it may not be installed. Run ONLY ADD migrations. If no Release Notes exist, proceed to browser testing.
 
 ---
 
 ## Step 5d: Browser Testing & Screenshots
 
-Run **sequentially** (one port at a time). Use the bundled example script or your own (set `JIRA_BROWSER_LOGIN_SCRIPT` if different):
+**Goal**: Validate each SUCCESS ticket with headless browser testing where meaningful, and explicitly document when browser testing is not applicable. Capture best-case screenshots as evidence. Max 3 test cases per ticket.
+
+This step is performed by the **main orchestrator** (NOT subagents) — browser is a single shared session; sequential testing across ports is fast enough.
+
+### 5d-0. Validate Test URLs
+
+Before testing, verify that any specific record IDs in `test_urls` exist in the dev database. Tickets often reference production IDs (e.g. `/admin/product/123/`) that may not exist in dev.
+
+If a record ID doesn't exist in dev, either:
+- Find a valid ID from the dev DB: `SELECT id FROM <table> ORDER BY id DESC LIMIT 5`
+- Use the list page URL instead of the change form URL
+- Skip that specific URL
+
+**Never upload a "DoesNotExist" error screenshot to Jira.**
+
+### 5d-1. Prepare Artifacts Directory
 
 ```bash
-python3 "${MULTI_JIRA_SKILL_DIR}/scripts/browser-login-example.py" \
+cd "$JIRA_GIT_REPO_DIR"
+for KEY in <SUCCESS_TICKET_KEYS>; do
+    mkdir -p artifacts/$KEY/
+done
+```
+
+### 5d-2. Ticket Categories and Expectations
+
+- **UI / order-tracking / customer-visible behavior** → Browser testing is **MANDATORY**. Validate that new/changed elements are visible where expected.
+- **Pure backend / cron / reporting (no suitable URL-based test surface)** → Browser testing is **OPTIONAL**, but you MUST add a Jira comment:
+  - `Browser Testing: Not applicable (no UI/API surface suitable for URL-based validation).`
+  - `Browser Testing: Validated via non-UI flow (e.g. cron run / direct DB checks); no browser flow available.`
+
+### 5d-3. Test Each SUCCESS Ticket (sequential, per-port)
+
+For each ticket with `status: "success"` and non-empty `test_urls`:
+
+```bash
+python3 "${JIRA_BROWSER_LOGIN_SCRIPT:-${MULTI_JIRA_SKILL_DIR}/scripts/browser-login-example.py}" \
     --base-url "http://127.0.0.1:<PORT>" \
     --artifacts-dir "artifacts/<KEY>" \
     --urls '/path/|Description 1' '/path2/|Description 2'
 ```
-Login flow is **app-specific** — the bundled script is an example for a two-step modal login; adapt or replace for your app. Validate test record IDs exist in dev DB before using detail URLs.
 
-**Jira screenshot rules:** Upload only **feature confirmation** screenshots to Jira (not login success, not errors). See [reference.md](reference.md).
+Login flow is **app-specific** — use `browser-login-template.py` or adapt the example; see [docs/custom-login-flow.md](docs/custom-login-flow.md).
+
+#### Jira Screenshot Rules (CRITICAL)
+
+Only **feature confirmation screenshots** go to Jira:
+
+| Upload to Jira? | Screenshot Type | Example |
+|:---:|---|---|
+| **YES** | Feature working correctly — confirms ticket scope | Admin page with new field visible |
+| **NO** | Login success — intermediate step | `login-success.png` |
+| **NO** | Error/traceback pages | `OperationalError` page |
+| **NO** | Internal debug screenshots | `error-login-no-password.png` |
+
+**Jira comment rules:**
+- Do NOT include internal infrastructure details (port numbers, container names, Docker info)
+- Do NOT reference error states unless the feature cannot work at all
+- Focus on: what was tested, what passed, PR link
+- If browser testing was **not run or not applicable**, you MUST still add a short Jira note:
+  - `Browser Testing: Not applicable (backend-only change).`
+  - `Browser Testing: Blocked by environment (container/login issues) – manual verification required.`
+
+### 5d-4. Build Test Summary
+
+After testing all tickets, build a per-ticket test summary:
+
+```
+PROJ-101:
+  - Admin home: PASS (admin-home.png)
+  - Product list: PASS (product-list.png)
+
+PROJ-102:
+  - Order export page: PASS (order-export-page.png)
+```
+
+Store this summary for Step 6 (Jira comment).
+
+### 5d-5. Handle Failures
+
+- **Individual test FAIL**: Note in summary, do NOT block workflow. PR can still be created — mention failure in PR description.
+- **All tests FAIL for a ticket**: Downgrade ticket status from SUCCESS to PARTIAL. Add note: "Implementation complete but browser validation failed."
+- **Container down / unreachable**: Skip testing for that ticket. Note "container unreachable" in summary.
+
+### 5d-6. Circuit Breaker
+
+- Max 2 login attempts per port — if both fail, skip that ticket's browser tests
+- Max 3 screenshot failures in a row (across all tickets) — stop browser testing, proceed to Step 6 with whatever screenshots were captured
+- Per-URL timeout: 30s, then skip that URL
 
 ---
 
@@ -302,16 +424,62 @@ Login flow is **app-specific** — the bundled script is an example for a two-st
 - **SUCCESS**: Release notes (if any), dev comment with screenshots, transition to "Code Review Done".
 
 ### 6b. Upload Screenshots & Post Dev Comment (SUCCESS)
+
+**Rules for Jira comments:** NO internal infra details (ports, container names); NO error state descriptions unless feature is broken; only PASS test cases and their descriptions; keep it stakeholder/QA friendly.
+
+Generate comment file:
+```bash
+cat > /tmp/jira_dev_comment_<KEY>.txt << 'COMMENT_EOF'
+Browser Test Results
+
+Changes:
+- <change 1 from worker result>
+- <change 2>
+
+Verified:
+- <Test description 1> - PASS
+- <Test description 2> - PASS
+
+Screenshots attached.
+
+PR: <Bitbucket/GitHub PR URL>
+COMMENT_EOF
+```
+
+Upload screenshots + post comment:
 ```bash
 bash "${MULTI_JIRA_SKILL_DIR}/scripts/upload-jira-screenshots.sh" \
     "<KEY>" "artifacts/<KEY>" "/tmp/jira_dev_comment_<KEY>.txt"
 ```
-Requires `JIRA_API_TOKEN`, `JIRA_USER`, `JIRA_BASE_URL`.
+
+**Release Notes (if applicable):** If the worker generated Release Notes and none exist in Jira yet. (Note: The `jq` below assumes Jira Cloud comment structure; Jira Server might use different fields — adapt if needed.)
+```bash
+EXISTING_RELEASE_NOTES=$(jira issue view <KEY> --raw | jq -r \
+  '[.fields.comment.comments[].body | .. | .text? // empty] | join(" ")' 2>/dev/null \
+  | grep -c "Release Notes" || true)
+
+if [ "$EXISTING_RELEASE_NOTES" -eq 0 ]; then
+    jira issue comment add <KEY> --no-input -T /tmp/jira_release_notes_<KEY>.txt
+fi
+```
 
 ### 6c. Transition (SUCCESS)
+
+Before transitioning, discover valid target states (project workflows differ):
+```bash
+jira issue view <KEY> --raw | jq '.transitions'
+```
+
+Then choose the appropriate state (e.g. "Code Review", "Code Review Done"):
 ```bash
 jira issue move <KEY> "Code Review Done"
 ```
+
+Jira lifecycle (adjust state names per project):
+- **Pending Dev Start** → **Dev Started** (Step 4d)
+- **Dev Started** → **Code Review** / **Code Review Done** (SUCCESS)
+- **Dev Started** → stays **Dev Started** (PARTIAL)
+- **Dev Started** → **Pending Dev Start** (FAILED — moved back)
 
 ### 6d. Cleanup
 ```bash
@@ -335,17 +503,21 @@ The script exits 0 if Telegram is not configured (no-op); otherwise it sends one
 
 When the batch is one epic — one branch, multiple sub-tasks — commit one task at a time, run tests, ask user to review, then continue with the next task on the same branch. Worktrees are for **parallel** branches; one worktree is enough for sequential tasks on one branch.
 
+**Benefits:** Smaller review surface, earlier feedback, no big-bang at the end, parallel flow (review + dev), clear rollback at task granularity.
+
 ---
 
 ## Error Handling & Circuit Breakers
 
-- **Orchestrator:** Stop and ask user on git dirty main, Docker build fail, missing env vars, or all tickets failed. Retry up to 3 then skip: container fail, worktree creation fail; ask user on git push fail.
+- **Orchestrator (STOP and ask user):** Git dirty on main, Docker build fail, missing env vars, all tickets failed.
+- **Orchestrator (retry up to 3, then skip):** Container fail, worktree creation fail; ask user on git push fail; Jira API error → skip Jira, report results.
 - **Worker:** Lint loop → suppress after 3; test failures → partial after 3; server crash → skip testing after 3; stuck → failed after 3.
-- **Browser:** Max 2 login attempts per port; max 3 consecutive screenshot failures across tickets then stop browser testing; per-URL timeout 30s. Browser failures do not downgrade SUCCESS to FAILED.
+- **Browser:** Max 2 login attempts per port; max 3 consecutive screenshot failures across tickets then stop browser testing; per-URL timeout 30s. Browser testing is **non-blocking** — failures do NOT change ticket status from SUCCESS to FAILED; tests are recorded as SKIP and noted in Jira comment.
 
 ---
 
 ## Additional Resources
 
 - [reference.md](reference.md) — architecture, lessons learned, Docker and browser testing details.
+- [WORKFLOW_DIAGRAM.md](WORKFLOW_DIAGRAM.md) — Mermaid flowchart of the full workflow.
 - Single-ticket workflow: use the same scripts (fetch, create-pr, browser-login) for one ticket; trigger and steps are documented in README.
